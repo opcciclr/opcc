@@ -1,0 +1,94 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: Python package
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#schedule
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+    inputs:
+      logLevel:
+        description: 'Log level'     
+        required: true
+        default: 'warning' 
+        type: choice
+        options:
+        - info
+        - warning
+        - debug 
+        
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ ubuntu-latest ]
+        python-version: [ 3.7, 3.8 ]
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Setup Mujoco
+        run: |
+          sudo apt-get update
+          sudo apt install -y  libosmesa6-dev  libglew-dev  libgl1-mesa-glx libgl1-mesa-dev libgl1-mesa-glx libglfw3
+          sudo apt install -y xpra xserver-xorg-dev patchelf
+          mkdir -p "$HOME/.mujoco"
+          cd $HOME/.mujoco
+          wget https://www.roboti.us/download/mujoco200_linux.zip
+          unzip -o mujoco200_linux.zip -d .
+          rm -rf *.zip*
+          wget https://www.roboti.us/file/mjkey.txt
+
+      - name: Fix up git URLs
+        run: echo -e '[url "https://github.com/"]\n  insteadOf = "git://github.com/"' >> ~/.gitconfig
+
+      - name: Install dependencies
+        run: |
+          export MUJOCO_PY_MUJOCO_PATH=$HOME/.mujoco/mujoco200_linux
+          export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$HOME/.mujoco/mujoco200_linux/bin
+          python3 -m pip install --upgrade pip setuptools wheel
+          python3 -m pip install flake8
+          pip3 install -e .
+          pip3 install torch==1.10.2+cpu -f https://download.pytorch.org/whl/cpu/torch_stable.html
+          pip3 install -e ".[test]"
+      - name: Lint with flake8
+        run: |
+          # stop the build if there are Python syntax errors or undefined names
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      - name: Test with pytest and generate coverage report
+        run: |
+          export MUJOCO_PY_MUJOCO_PATH=$HOME/.mujoco/mujoco200_linux
+          export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$HOME/.mujoco/mujoco200_linux/bin
+          
+          # disabling some tests as they take too long on github workflow
+          export SKIP_QUERY_TARGET_TESTS=1
+          export SKIP_Q_LEARNING_DATASET_TEST=1
+          export SKIP_SEQUENCE_DATASET_TEST=1
+          
+          # test
+          pytest -v --cov=./ --cov-report=xml
+#      - name: Upload coverage to Codecov
+#        uses: codecov/codecov-action@v2
+#        with:
+#          token: ${{ secrets.CODECOV_TOKEN }}
+#          directory: ./coverage/reports/
+#          env_vars: OS,PYTHON
+#          fail_ci_if_error: true
+#          files: ./coverage.xml
+#          flags: unittests
+#          name: codecov-umbrella
+#          path_to_write_report: ./coverage/codecov_report.txt
+#          verbose: true
